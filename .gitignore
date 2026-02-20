@@ -1,3 +1,19 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Mono/C# build output
+.mono/
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Rider / VSCode
+.idea/
+.vscode/
