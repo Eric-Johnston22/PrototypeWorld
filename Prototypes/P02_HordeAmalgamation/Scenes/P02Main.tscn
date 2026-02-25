@@ -1,0 +1,22 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Prototypes/P02_HordeAmalgamation/P02Main.cs" id="1_main"]
+[ext_resource type="Script" path="res://Shared/Scripts/HUD.cs" id="2_hud"]
+[ext_resource type="Script" path="res://Prototypes/P02_HordeAmalgamation/P02World.cs" id="3_world"]
+[ext_resource type="PackedScene" path="res://Shared/Scenes/Player.tscn" id="4_player"]
+[ext_resource type="PackedScene" path="res://Prototypes/P02_HordeAmalgamation/Scenes/HordeAmalgamation.tscn" id="5_amalgamation"]
+
+[node name="P02Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="World" type="Node3D" parent="."]
+script = ExtResource("3_world")
+
+[node name="Player" parent="." instance=ExtResource("4_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 5.0)
+
+[node name="HordeAmalgamation" parent="." instance=ExtResource("5_amalgamation")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0, -4.0)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("2_hud")

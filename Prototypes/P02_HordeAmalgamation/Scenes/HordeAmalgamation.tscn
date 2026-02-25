@@ -1,0 +1,17 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Prototypes/P02_HordeAmalgamation/HordeAmalgamation.cs" id="1_amalgamation"]
+[ext_resource type="PackedScene" uid="uid://biao20bw64dbj" path="res://Shared/Assets/Models/garbagemonster.glb" id="2_model"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 1.0
+height = 3.0
+
+[node name="HordeAmalgamation" type="CharacterBody3D"]
+script = ExtResource("1_amalgamation")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="GarbageMonster" parent="." instance=ExtResource("2_model")]

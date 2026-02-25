@@ -34,8 +34,15 @@ public partial class Vacuum : Node3D
 
 	public int CollectedCount => _collectedCount;
 
+	// Public API for other systems (e.g. HordeAmalgamation) to poll vacuum state
+	public bool IsSucking => _isSucking;
+	public bool IsBlowing => _isBlowing;
+	public Vector3 NozzleGlobalPosition => _nozzleTip != null ? _nozzleTip.GlobalPosition : GlobalPosition;
+	public Vector3 NozzleForward => _nozzleTip != null ? -_nozzleTip.GlobalBasis.Z : -GlobalBasis.Z;
+
 	public override void _Ready()
 	{
+		AddToGroup("vacuum");
 		_nozzleTip = GetNode<Marker3D>("NozzleTip");
 		_suctionArea = GetNode<Area3D>("SuctionArea");
 		_nozzleMesh = GetNode<MeshInstance3D>("NozzleMesh");

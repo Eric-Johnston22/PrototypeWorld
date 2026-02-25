@@ -1,0 +1,54 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Shared/Scripts/Vacuum.cs" id="1_vacuum"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_nozzle"]
+top_radius = 0.03
+bottom_radius = 0.06
+height = 0.6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_nozzle"]
+albedo_color = Color(0.25, 0.25, 0.3, 1)
+metallic = 0.8
+roughness = 0.3
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_suction"]
+size = Vector3(6, 4, 14)
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_suction"]
+direction = Vector3(0, 0, 1)
+spread = 15.0
+initial_velocity_min = 3.0
+initial_velocity_max = 8.0
+gravity = Vector3(0, 0, 0)
+scale_min = 0.02
+scale_max = 0.08
+color = Color(0.5, 0.85, 1, 0.5)
+
+[sub_resource type="SphereMesh" id="SphereMesh_particle"]
+radius = 0.05
+height = 0.1
+
+[node name="Vacuum" type="Node3D"]
+script = ExtResource("1_vacuum")
+
+[node name="NozzleTip" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, -0.8)
+
+[node name="NozzleMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.6495353, 0, 0.7624093, -0.6271322, 0.14471984, 0.736113, -0.16911931, -0.5366535, 0.19850829, 0.3, -0.15, -0.419539)
+mesh = SubResource("CylinderMesh_nozzle")
+surface_material_override/0 = SubResource("StandardMaterial3D_nozzle")
+
+[node name="SuctionArea" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -7)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="SuctionArea"]
+shape = SubResource("BoxShape3D_suction")
+
+[node name="SuctionParticles" type="GPUParticles3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, -1)
+amount = 20
+lifetime = 0.6
+process_material = SubResource("ParticleProcessMaterial_suction")
+draw_pass_1 = SubResource("SphereMesh_particle")
