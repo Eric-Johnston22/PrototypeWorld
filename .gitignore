@@ -17,3 +17,11 @@ Thumbs.db
 # Rider / VSCode
 .idea/
 .vscode/
+
+# Executables / installers — never commit these
+*.exe
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
