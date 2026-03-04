@@ -19,6 +19,9 @@ public partial class HUD : CanvasLayer
 	private float _notificationTimer;
 	private int _maxCapacity = 100;
 
+	private ProgressBar _healthBar;
+	private Label _healthLabel;
+
 	// Crosshair animation
 	private float _crosshairSpread;
 	private float _targetSpread;
@@ -148,12 +151,50 @@ public partial class HUD : CanvasLayer
 		_notificationLabel.AddThemeFontSizeOverride("font_size", 18);
 		root.AddChild(_notificationLabel);
 
+		// --- Bottom-left panel: player health ---
+		var hpPanel = new PanelContainer();
+		hpPanel.SetAnchorsPreset(Control.LayoutPreset.BottomLeft);
+		hpPanel.Position = new Vector2(20, -110);
+		hpPanel.Size = new Vector2(220, 80);
+		hpPanel.MouseFilter = Control.MouseFilterEnum.Ignore;
+		hpPanel.AddThemeStyleboxOverride("panel", panelStyle);
+		root.AddChild(hpPanel);
+
+		var hpVbox = new VBoxContainer();
+		hpVbox.AddThemeConstantOverride("separation", 4);
+		hpPanel.AddChild(hpVbox);
+
+		_healthLabel = new Label();
+		_healthLabel.Text = "HP  100 / 100";
+		_healthLabel.AddThemeColorOverride("font_color", new Color(0.9f, 0.35f, 0.35f));
+		_healthLabel.AddThemeFontSizeOverride("font_size", 14);
+		hpVbox.AddChild(_healthLabel);
+
+		_healthBar = new ProgressBar();
+		_healthBar.MinValue = 0;
+		_healthBar.MaxValue = 100;
+		_healthBar.Value = 100;
+		_healthBar.ShowPercentage = false;
+		_healthBar.CustomMinimumSize = new Vector2(0, 22);
+
+		var hpBg = new StyleBoxFlat();
+		hpBg.BgColor = new Color(0.15f, 0.15f, 0.15f, 0.8f);
+		hpBg.SetCornerRadiusAll(4);
+		_healthBar.AddThemeStyleboxOverride("background", hpBg);
+
+		var hpFill = new StyleBoxFlat();
+		hpFill.BgColor = new Color(0.85f, 0.2f, 0.2f);
+		hpFill.SetCornerRadiusAll(4);
+		_healthBar.AddThemeStyleboxOverride("fill", hpFill);
+
+		hpVbox.AddChild(_healthBar);
+
 		// --- Controls hint (top-left) ---
 		var hintsLabel = new Label();
 		hintsLabel.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
 		hintsLabel.Position = new Vector2(16, 16);
 		hintsLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
-		hintsLabel.Text = "WASD - Move | Shift - Sprint | Space - Jump\nLeft Click - Suck | Right Click - Blow | Esc - Cursor";
+		hintsLabel.Text = "WASD - Move | Shift - Sprint | Space - Jump\nLeft Click - Suck | Right Click - Blow | Esc - Pause";
 		hintsLabel.AddThemeColorOverride("font_color", new Color(1, 1, 1, 0.4f));
 		hintsLabel.AddThemeFontSizeOverride("font_size", 12);
 		root.AddChild(hintsLabel);
@@ -213,6 +254,21 @@ public partial class HUD : CanvasLayer
 		_notificationLabel.Position = new Vector2(
 			_notificationLabel.Position.X, 40);
 		_notificationTimer = 2.0f;
+	}
+
+	public void OnHealthChanged(int current, int max)
+	{
+		_healthBar.MaxValue = max;
+		_healthBar.Value = current;
+		_healthLabel.Text = $"HP  {current} / {max}";
+
+		// Bar turns darker red as health drops
+		float ratio = (float)current / max;
+		var fill = _healthBar.GetThemeStylebox("fill") as StyleBoxFlat;
+		if (fill != null)
+			fill.BgColor = ratio > 0.5f
+				? new Color(0.85f, 0.2f, 0.2f)
+				: new Color(0.6f, 0.08f, 0.08f);
 	}
 
 	public void OnVacuumStateChanged(bool sucking, bool blowing)

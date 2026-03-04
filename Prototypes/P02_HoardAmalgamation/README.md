@@ -1,4 +1,4 @@
-# P02 — Horde Amalgamation
+# P02 — Hoard Amalgamation
 
 **Design Question:** Can a room-as-mob encounter feel fun to fight with a vacuum?
 

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dyhws8e6igy5n"
-path="res://.godot/imported/garbagemonster.glb-179cfd5d39f59238e22e2d92627bd881.scn"
+uid="uid://rqah74npt4h8"
+path="res://.godot/imported/garbagemonster2withanimations.glb-689a96b28024e2968520a8fd11b6edb3.scn"
 
 [deps]
 
-source_file="res://Shared/Assets/Models/garbagemonster.glb"
-dest_files=["res://.godot/imported/garbagemonster.glb-179cfd5d39f59238e22e2d92627bd881.scn"]
+source_file="res://Shared/Assets/Models/garbagemonster2withanimations.glb"
+dest_files=["res://.godot/imported/garbagemonster2withanimations.glb-689a96b28024e2968520a8fd11b6edb3.scn"]
 
 [params]
 

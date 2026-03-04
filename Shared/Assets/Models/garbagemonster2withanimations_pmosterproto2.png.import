@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://nryx0vs5ajcx"
-path.s3tc="res://.godot/imported/garbagemonster_gmonster.png-4b6362c304f8a54c2d4c74c8881a3c70.s3tc.ctex"
+uid="uid://1xkly27kall6"
+path.s3tc="res://.godot/imported/garbagemonster2withanimations_pmosterproto2.png-45bcae4adf6e49ee58101789340a7c9c.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "2843b52f5acd8c502ed9c5bd42fe9ea8"
+"md5": "5242c5617c9761c58cbbd4ec243083be"
 }
 
 [deps]
 
-source_file="res://Shared/Assets/Models/garbagemonster_gmonster.png"
-dest_files=["res://.godot/imported/garbagemonster_gmonster.png-4b6362c304f8a54c2d4c74c8881a3c70.s3tc.ctex"]
+source_file="res://Shared/Assets/Models/garbagemonster2withanimations_pmosterproto2.png"
+dest_files=["res://.godot/imported/garbagemonster2withanimations_pmosterproto2.png-45bcae4adf6e49ee58101789340a7c9c.s3tc.ctex"]
 
 [params]
 

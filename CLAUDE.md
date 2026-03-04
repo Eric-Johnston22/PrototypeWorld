@@ -31,7 +31,7 @@ hoarders/
 │       └── Models/
 ├── Prototypes/
 │   ├── P01_VacuumCore/       ← Basic suction/blow feel prototype
-│   └── P02_HordeAmalgamation/← Room-as-mob combat prototype
+│   └── P02_HoardAmalgamation/← Room-as-mob combat prototype
 └── VerticalSlice/            ← Future: validated full-game slice
 ```
 
@@ -57,12 +57,38 @@ dotnet format
 
 ## Architecture
 
-### Shared Systems (target state)
+### Autoloads
 
-- **`Shared/Scripts/PlayerController.cs`** — FPS movement, mouse look, jump, sprint
+| Name | Script | Purpose |
+|---|---|---|
+| `GameManager` | `Shared/Scripts/GameManager.cs` | Game flow (MainMenu → Playing → Paused), owns Escape key |
+| `SettingsManager` | `Shared/Scripts/SettingsManager.cs` | Loads/saves/applies user settings to `user://settings.cfg` |
+
+### Shared Systems
+
+- **`Shared/Scripts/PlayerController.cs`** — FPS movement, mouse look, jump, sprint. Supports `InvertY` and reads settings from `SettingsManager` on startup.
 - **`Shared/Scripts/Vacuum.cs`** — Suction/blow mechanics, signals, attachment system
 - **`Shared/Scripts/VacuumableObject.cs`** — RigidBody3D component for suckable objects
-- **`Shared/Scripts/EventBus.cs`** — Global signal bus (see GODOT_GUIDELINES.md)
+- **`Shared/Scripts/HUD.cs`** — In-game HUD: crosshair, capacity bar, item notifications
+- **`Shared/Scripts/MainMenu.cs`** — Main menu screen (Play, Settings, Quit). Scene: `Shared/Scenes/MainMenu.tscn`
+- **`Shared/Scripts/PauseMenu.cs`** — Pause overlay (Resume, Settings, Quit to Menu). Scene: `Shared/Scenes/PauseMenu.tscn`. Spawned by prototype Main scripts.
+- **`Shared/Scripts/SettingsMenu.cs`** — Settings panel embedded in MainMenu and PauseMenu (mouse sensitivity, FOV, volume, invert Y, screenshake)
+
+### Game Flow
+
+```
+MainMenu.tscn (main scene)
+  → PLAY → GameManager.StartGame() → loads prototype scene
+  → Escape → GameManager.PauseGame() → shows PauseMenu
+  → Resume → GameManager.ResumeGame() → hides PauseMenu
+  → Quit to Menu → GameManager.QuitToMainMenu() → loads MainMenu.tscn
+```
+
+Each prototype's Main script must spawn a PauseMenu instance in `_Ready()`:
+```csharp
+var pauseScene = GD.Load<PackedScene>("res://Shared/Scenes/PauseMenu.tscn");
+AddChild(pauseScene.Instantiate());
+```
 
 ### Prototype: P01_VacuumCore
 
@@ -70,7 +96,7 @@ dotnet format
 
 Reference implementation: `C:\Users\ericm\Game Dev\vacuum-prototype`
 
-### Prototype: P02_HordeAmalgamation
+### Prototype: P02_HoardAmalgamation
 
 **Question:** Can a room-as-mob encounter with layered junk and vacuum attachments be fun?
 

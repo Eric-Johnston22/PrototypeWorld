@@ -14,16 +14,36 @@ public partial class PlayerController : CharacterBody3D
 	[Export] public float MouseSensitivity = 0.002f;
 	[Export] public float Acceleration = 10.0f;
 	[Export] public float Friction = 8.0f;
+	[Export] public int MaxHealth = 100;
+
+	public bool InvertY = false;
+	public int CurrentHealth { get; private set; }
+
+	[Signal] public delegate void HealthChangedEventHandler(int current, int max);
+	[Signal] public delegate void PlayerDiedEventHandler();
 
 	private Node3D _head;
 	private float _gravity;
+	private bool _isDead = false;
 
 	public override void _Ready()
 	{
 		AddToGroup("player");
 		_gravity = (float)ProjectSettings.GetSetting("physics/3d/default_gravity");
 		_head = GetNode<Node3D>("Head");
+		CurrentHealth = MaxHealth;
 		Input.MouseMode = Input.MouseModeEnum.Captured;
+
+		// Apply saved settings if SettingsManager is available
+		var sm = GetNodeOrNull<Node>("/root/SettingsManager");
+		if (sm != null)
+		{
+			MouseSensitivity = (float)sm.Get("MouseSensitivity");
+			InvertY = (bool)sm.Get("InvertY");
+			var cam = _head.GetNodeOrNull<Camera3D>("Camera3D");
+			if (cam != null)
+				cam.Fov = (float)sm.Get("FieldOfView");
+		}
 	}
 
 	public override void _Input(InputEvent @event)
@@ -31,17 +51,11 @@ public partial class PlayerController : CharacterBody3D
 		if (@event is InputEventMouseMotion mouseMotion && Input.MouseMode == Input.MouseModeEnum.Captured)
 		{
 			RotateY(-mouseMotion.Relative.X * MouseSensitivity);
-			_head.RotateX(-mouseMotion.Relative.Y * MouseSensitivity);
+			float yFactor = InvertY ? 1.0f : -1.0f;
+			_head.RotateX(mouseMotion.Relative.Y * MouseSensitivity * yFactor);
 			var headRot = _head.Rotation;
 			headRot.X = Mathf.Clamp(headRot.X, Mathf.DegToRad(-89f), Mathf.DegToRad(89f));
 			_head.Rotation = headRot;
-		}
-
-		if (@event.IsActionPressed("ui_cancel"))
-		{
-			Input.MouseMode = Input.MouseMode == Input.MouseModeEnum.Captured
-				? Input.MouseModeEnum.Visible
-				: Input.MouseModeEnum.Captured;
 		}
 	}
 
@@ -76,5 +90,17 @@ public partial class PlayerController : CharacterBody3D
 
 		Velocity = velocity;
 		MoveAndSlide();
+	}
+
+	public void TakeDamage(int amount)
+	{
+		if (_isDead) return;
+		CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
+		EmitSignal(SignalName.HealthChanged, CurrentHealth, MaxHealth);
+		if (CurrentHealth <= 0)
+		{
+			_isDead = true;
+			EmitSignal(SignalName.PlayerDied);
+		}
 	}
 }
