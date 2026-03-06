@@ -12,19 +12,31 @@ namespace Hoarders;
 /// </summary>
 public partial class HoardAmalgamation : CharacterBody3D
 {
-	[Export] public int MaxHealth = 20;
+	[Export] public int MaxHealth = 100;
 	[Export] public float SuctionDamagePerSecond = 3.0f;
-	[Export] public float MoveSpeed = 1.5f;
-	[Export] public float AggroDistance = 9.0f;   // ~10 yards
-	[Export] public float MeleeDistance = 2.7f;   // ~3 yards
+	[Export] public float MoveSpeed = 2.5f;
+	[Export] public float AggroDistance = 20.0f;  // ~22 yards — active across most of the room
+	[Export] public float MeleeDistance = 7.0f;   // ~3 yards
 	[Export] public float VacuumRange = 14.0f;
-	[Export] public float ProjectileSpeed = 12.0f;
+	[Export] public float ProjectileSpeed = 18.0f;
 	[Export] public int MeleeDamage = 15;
+	[Export] public int ProjectileDamage = 10;
+	// Local-space offset from monster origin → projectile spawn point (right hand).
+	// X = right, Y = height, Z = forward (-Z faces player after LookAt).
+	// Overridden automatically if a hand bone is found on the skeleton.
+	[Export] public Vector3 ThrowOffset = new(0.8f, 1.8f, -0.3f);
+
+	// Animation names — must match exactly what Godot imported from the GLB.
+	// Check the Output panel on first run; available names are printed there.
+	[Export] public string AnimIdle   = "Idle";
+	[Export] public string AnimThrow  = "throw";
+	[Export] public string AnimMelee  = "hand attack";
+	[Export] public string AnimHurt   = "hurt";
 
 	// Tune these to match the exact keyframe moment in the GLB animations
-	[Export] public float ThrowReleaseTime = 0.6f;  // seconds into "throw" when projectile spawns
-	[Export] public float MeleeImpactTime = 0.4f;   // seconds into "hand attack" when damage lands
-	[Export] public float ThrowCooldown = 2.5f;     // seconds between throws
+	[Export] public float ThrowReleaseTime = 0.6f;  // seconds into throw anim when projectile spawns
+	[Export] public float MeleeImpactTime = 0.4f;   // seconds into melee anim when damage lands
+	[Export] public float ThrowCooldown = 1.0f;     // seconds between throws
 	[Export] public float HurtCooldown = 0.5f;      // prevents hurt anim spamming every frame
 
 	private float _health;
@@ -34,6 +46,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 	private CharacterBody3D? _player;
 	private Label3D? _healthLabel;
 	private AnimationPlayer? _animPlayer;
+	private Skeleton3D? _skeleton;
 	private float _gravity;
 
 	private enum State { Idle, ThrowAttack, MeleeAttack, Hurt, Dead }
@@ -61,6 +74,8 @@ public partial class HoardAmalgamation : CharacterBody3D
 
 	public override void _Ready()
 	{
+		AddToGroup("hoard_amalgamation");
+
 		_gravity = (float)ProjectSettings.GetSetting("physics/3d/default_gravity");
 		_health = MaxHealth;
 		_nextChunkThreshold = MaxHealth - 1;
@@ -84,9 +99,18 @@ public partial class HoardAmalgamation : CharacterBody3D
 
 		_animPlayer = FindChild("AnimationPlayer", true, false) as AnimationPlayer;
 		if (_animPlayer != null)
+		{
 			_animPlayer.AnimationFinished += OnAnimationFinished;
+			GD.Print($"[HoardAmalgamation] Available animations: {string.Join(", ", _animPlayer.GetAnimationList())}");
+		}
+		else
+		{
+			GD.PrintErr("[HoardAmalgamation] No AnimationPlayer found!");
+		}
 
-		PlayAnim("Idle", loop: true);
+		_skeleton = FindChild("Skeleton3D", true, false) as Skeleton3D;
+
+		PlayAnim(AnimIdle, loop: true);
 	}
 
 	public override void _PhysicsProcess(double delta)
@@ -121,17 +145,34 @@ public partial class HoardAmalgamation : CharacterBody3D
 			return;
 		}
 
-		// Determine desired state based on player distance
+		// Determine desired state based on horizontal (XZ) distance to player.
+		// Horizontal-only avoids false readings when one body has a different Y origin.
 		if (_player != null)
 		{
-			float dist = GlobalPosition.DistanceTo(_player.GlobalPosition);
+			var toPlayer = _player.GlobalPosition - GlobalPosition;
+			toPlayer.Y = 0f;
+			float dist = toPlayer.Length();
 
 			if (dist > AggroDistance)
-				TransitionTo(State.Idle);
+			{
+				if (_state != State.Idle)
+					TransitionTo(State.Idle);
+			}
 			else if (dist <= MeleeDistance)
-				TransitionTo(State.MeleeAttack);
+			{
+				// Melee takes full priority — interrupt throw if needed, but never hurt
+				if (_state != State.MeleeAttack && _state != State.Hurt)
+				{
+					GD.Print($"[HoardAmalgamation] Entering MELEE at dist={dist:F2}m, prev state={_state}");
+					TransitionTo(State.MeleeAttack);
+				}
+			}
 			else
-				TransitionTo(State.ThrowAttack);
+			{
+				// Throw range — only start a new throw from Idle when cooldown allows
+				if (_state == State.Idle && _throwCooldownTimer <= 0f)
+					TransitionTo(State.ThrowAttack);
+			}
 
 			if (_state != State.Idle)
 				FacePlayer();
@@ -190,26 +231,17 @@ public partial class HoardAmalgamation : CharacterBody3D
 		switch (newState)
 		{
 			case State.Idle:
-				PlayAnim("Idle", loop: true);
+				PlayAnim(AnimIdle, loop: true);
 				break;
 
 			case State.ThrowAttack:
-				if (_throwCooldownTimer <= 0f)
-				{
-					_throwEventFired = false;
-					PlayAnim("throw");
-				}
-				else
-				{
-					// Cooldown still running — idle in place until ready
-					PlayAnim("Idle", loop: true);
-					_state = State.Idle; // don't commit to ThrowAttack yet
-				}
+				_throwEventFired = false;
+				PlayAnim(AnimThrow);
 				break;
 
 			case State.MeleeAttack:
 				_meleeEventFired = false;
-				PlayAnim("hand attack");
+				PlayAnim(AnimMelee);
 				break;
 		}
 	}
@@ -218,37 +250,38 @@ public partial class HoardAmalgamation : CharacterBody3D
 	{
 		if (_state == State.Dead) return;
 
-		if (animName == "throw")
+		GD.Print($"[HoardAmalgamation] AnimFinished: '{animName}'  state={_state}");
+
+		if (animName == AnimThrow)
 		{
 			_throwCooldownTimer = ThrowCooldown;
-			// Re-evaluate next physics frame — fall back to idle so TransitionTo works
 			_state = State.Idle;
-			PlayAnim("Idle", loop: true);
+			PlayAnim(AnimIdle, loop: true);
 		}
-		else if (animName == "hand attack")
+		else if (animName == AnimMelee)
 		{
 			_state = State.Idle;
-			PlayAnim("Idle", loop: true);
+			PlayAnim(AnimIdle, loop: true);
 		}
-		else if (animName == "hurt")
+		else if (animName == AnimHurt)
 		{
 			// Resume the state we interrupted
 			_state = _stateBeforeHurt;
 			switch (_state)
 			{
 				case State.Idle:
-					PlayAnim("Idle", loop: true);
+					PlayAnim(AnimIdle, loop: true);
 					break;
 				case State.ThrowAttack:
 					_throwEventFired = false;
-					PlayAnim("throw");
+					PlayAnim(AnimThrow);
 					break;
 				case State.MeleeAttack:
 					_meleeEventFired = false;
-					PlayAnim("hand attack");
+					PlayAnim(AnimMelee);
 					break;
 				default:
-					PlayAnim("Idle", loop: true);
+					PlayAnim(AnimIdle, loop: true);
 					break;
 			}
 		}
@@ -260,29 +293,76 @@ public partial class HoardAmalgamation : CharacterBody3D
 
 	private void SpawnProjectile()
 	{
-		var chunk = new VacuumableObject();
-		chunk.Size = VacuumableObject.ObjectSize.Small;
-		chunk.DisplayName = "Thrown Junk";
-		chunk.ObjectColor = DebrisColors[_rng.RandiRange(0, DebrisColors.Length - 1)];
+		// Projectile body — vacuumable so the player can pick it up and throw it back
+		var projectile = new RigidBody3D();
+		projectile.ContinuousCd = true;
+		projectile.ContactMonitor = true;
+		projectile.MaxContactsReported = 2;
+		projectile.AddToGroup("vacuumable"); // vacuum can attract it
+		projectile.AddToGroup("holdable");   // vacuum holds it instead of collecting it
+		projectile.SetMeta("display_name", "Dr. Heffer Can");
 
-		float s = _rng.RandfRange(0.15f, 0.3f);
-		var mesh = new MeshInstance3D();
-		mesh.Mesh = new BoxMesh { Size = new Vector3(s, s, s) };
-		chunk.AddChild(mesh);
+		// Dr. Heffer model as the visual
+		var modelScene = GD.Load<PackedScene>("res://Shared/Assets/Models/drhefferfixed2.glb");
+		if (modelScene != null)
+		{
+			var model = modelScene.Instantiate<Node3D>();
+			model.Scale = Vector3.One * 0.25f;
+			projectile.AddChild(model);
+		}
+		else
+		{
+			// Fallback if the GLB isn't imported yet
+			var fallback = new MeshInstance3D();
+			fallback.Mesh = new SphereMesh { Radius = 0.25f, Height = 0.5f };
+			projectile.AddChild(fallback);
+			GD.PrintErr("HoardAmalgamation: drhefferfixed2.glb not found — using fallback mesh.");
+		}
 
+		// Collision shape
 		var col = new CollisionShape3D();
-		col.Shape = new BoxShape3D { Size = new Vector3(s, s, s) };
-		chunk.AddChild(col);
+		col.Shape = new SphereShape3D { Radius = 0.35f };
+		projectile.AddChild(col);
 
-		chunk.ContinuousCd = true;
-		chunk.Position = GlobalPosition + Vector3.Up * 1.8f;
-		GetTree().Root.AddChild(chunk);
+		// Spawn at the monster's hand position
+		projectile.Position = GetThrowOrigin();
+		GetTree().Root.AddChild(projectile);
 
+		// Launch toward the player's chest height
 		if (_player != null)
 		{
 			var target = _player.GlobalPosition + Vector3.Up * 1.0f;
-			chunk.LinearVelocity = (target - chunk.Position).Normalized() * ProjectileSpeed;
+			var dir = (target - projectile.Position).Normalized();
+			projectile.LinearVelocity = dir * ProjectileSpeed;
+			// Tumbling spin for character — rotate around a random axis
+			projectile.AngularVelocity = new Vector3(
+				_rng.RandfRange(-6f, 6f),
+				_rng.RandfRange(-4f, 4f),
+				_rng.RandfRange(-6f, 6f)
+			);
 		}
+
+		// Deal damage once on first contact with the player.
+		// The "can_damage_player" meta is set to false when the player grabs it,
+		// so a reflected can never damages the player.
+		projectile.SetMeta("can_damage_player", Variant.From(true));
+		projectile.BodyEntered += (body) =>
+		{
+			if (!projectile.GetMeta("can_damage_player", Variant.From(true)).AsBool()) return;
+			if (body is PlayerController pc)
+			{
+				projectile.SetMeta("can_damage_player", Variant.From(false)); // one hit only
+				pc.TakeDamage(ProjectileDamage);
+			}
+		};
+
+		// Auto-clean after 10 seconds so stray projectiles don't litter the room
+		var lifetime = GetTree().CreateTimer(10.0);
+		lifetime.Timeout += () =>
+		{
+			if (IsInstanceValid(projectile))
+				projectile.QueueFree();
+		};
 	}
 
 	private void OnMeleeImpact()
@@ -296,7 +376,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 			pc.TakeDamage(MeleeDamage);
 	}
 
-	private void TakeDamage(float amount)
+	public void TakeDamage(float amount)
 	{
 		if (_state == State.Dead) return;
 
@@ -305,7 +385,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 		while (_health <= _nextChunkThreshold && _nextChunkThreshold >= 0)
 		{
 			SpawnDebrisChunk();
-			_nextChunkThreshold -= 1.0f;
+			_nextChunkThreshold -= 5.0f; // one chunk per 5 HP → ~20 chunks over 100 HP
 		}
 
 		UpdateHealthLabel();
@@ -354,6 +434,40 @@ public partial class HoardAmalgamation : CharacterBody3D
 		var lookTarget = new Vector3(_player.GlobalPosition.X, GlobalPosition.Y, _player.GlobalPosition.Z);
 		if (GlobalPosition.DistanceTo(lookTarget) > 0.1f)
 			LookAt(lookTarget, Vector3.Up);
+	}
+
+	/// <summary>
+	/// Returns the world-space position to spawn the thrown projectile from.
+	/// Tries to use the skeleton's actual hand bone for accuracy, falls back
+	/// to a configurable local-space offset (ThrowOffset) on the monster body.
+	/// </summary>
+	private Vector3 GetThrowOrigin()
+	{
+		if (_skeleton != null)
+		{
+			// Try common humanoid right-hand bone names (Blender, Mixamo, etc.)
+			string[] candidates =
+			{
+				"Hand.R", "hand.R", "RightHand", "right_hand", "Hand_R",
+				"mixamorig:RightHand", "Bip01_R_Hand", "RHand", "r_hand",
+				// Also try left hand variants in case the rig is mirrored
+				"Hand.L", "hand.L", "LeftHand", "left_hand", "Hand_L",
+			};
+			foreach (var boneName in candidates)
+			{
+				int idx = _skeleton.FindBone(boneName);
+				if (idx >= 0)
+				{
+					// GetBoneGlobalPose returns pose in skeleton-local space; multiply by skeleton's global transform
+					var boneOrigin = _skeleton.GlobalTransform * _skeleton.GetBoneGlobalPose(idx).Origin;
+					return boneOrigin;
+				}
+			}
+		}
+
+		// Fallback: offset in the monster's local space.
+		// After FacePlayer(), -Z faces the player, so negative Z = forward.
+		return GlobalPosition + GlobalTransform.Basis * ThrowOffset;
 	}
 
 	private void SpawnDebrisChunk()

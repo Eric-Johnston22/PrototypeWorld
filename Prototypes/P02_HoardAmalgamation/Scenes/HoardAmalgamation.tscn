@@ -1,4 +1,4 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://2hv4ehu4yr4j"]
 
 [ext_resource type="Script" uid="uid://d2asrd5o15o1f" path="res://Prototypes/P02_HoardAmalgamation/HoardAmalgamation.cs" id="1_amalgamation"]
 [ext_resource type="PackedScene" uid="uid://rqah74npt4h8" path="res://Shared/Assets/Models/garbagemonster2withanimations.glb" id="2_model"]
@@ -7,12 +7,12 @@
 radius = 1.0
 height = 3.0
 
-[node name="HoardAmalgamation" type="CharacterBody3D"]
+[node name="HoardAmalgamation" type="CharacterBody3D" unique_id=1644832724]
 script = ExtResource("1_amalgamation")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=58249444]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("CapsuleShape3D_body")
 
-[node name="GarbageMonster" parent="." instance=ExtResource("2_model")]
+[node name="GarbageMonster" parent="." unique_id=2043058647 instance=ExtResource("2_model")]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)

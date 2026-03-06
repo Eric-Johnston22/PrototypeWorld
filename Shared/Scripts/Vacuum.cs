@@ -16,6 +16,8 @@ public partial class Vacuum : Node3D
 	[Export] public float CollectDistance = 0.8f;
 	[Export] public int MaxCapacity = 100;
 	[Export] public float ShrinkStartDistance = 3.0f;
+	[Export] public float FireSpeed = 28.0f;       // speed of a reflected holdable projectile
+	[Export] public int ReflectDamage = 25;        // damage dealt to monster when can is fired back
 
 	private Marker3D _nozzleTip;
 	private Area3D _suctionArea;
@@ -24,6 +26,7 @@ public partial class Vacuum : Node3D
 	private bool _isSucking;
 	private bool _isBlowing;
 	private int _collectedCount;
+	private RigidBody3D? _heldObject = null;       // currently held "holdable" projectile
 	private readonly List<RigidBody3D> _bodiesInRange = new();
 
 	[Signal]
@@ -72,12 +75,23 @@ public partial class Vacuum : Node3D
 		bool wasBlowing = _isBlowing;
 
 		_isSucking = Input.IsActionPressed("vacuum_suck") && _collectedCount < MaxCapacity;
-		_isBlowing = Input.IsActionPressed("vacuum_blow") && !_isSucking;
+
+		// Fire the held object with the blow action (takes priority over normal blow)
+		if (_heldObject != null && Input.IsActionJustPressed("vacuum_blow"))
+		{
+			FireHeldObject();
+			_isBlowing = false;
+		}
+		else
+		{
+			// Normal blow only works when not sucking and not holding anything
+			_isBlowing = Input.IsActionPressed("vacuum_blow") && !_isSucking && _heldObject == null;
+		}
 
 		_suctionParticles.Emitting = _isSucking;
 
-		// Bob the nozzle slightly when active
-		if (_isSucking || _isBlowing)
+		// Bob the nozzle slightly when active or holding
+		if (_isSucking || _isBlowing || _heldObject != null)
 		{
 			float bob = Mathf.Sin((float)Time.GetTicksMsec() / 80.0f) * 0.002f;
 			var pos = _nozzleMesh.Position;
@@ -91,13 +105,45 @@ public partial class Vacuum : Node3D
 
 	public override void _PhysicsProcess(double delta)
 	{
-		if (!_isSucking && !_isBlowing)
+		if (!_isSucking && !_isBlowing && _heldObject == null)
 			return;
 
 		var nozzlePos = _nozzleTip.GlobalPosition;
 		var forward = -_nozzleTip.GlobalBasis.Z;
 
-		// Process bodies in range - iterate backwards to safely remove
+		// ── Held object: spring to nozzle or drop ────────────────────────────
+		if (_heldObject != null)
+		{
+			if (!_isSucking)
+			{
+				DropHeldObject();
+			}
+			else
+			{
+				// Spring the can to a point just in front of the nozzle tip
+				var holdPoint = nozzlePos + forward * 0.6f;
+				_heldObject.LinearVelocity = (holdPoint - _heldObject.GlobalPosition) * 25f;
+				_heldObject.AngularVelocity = new Vector3(0f, 2f, 0f); // gentle spin while held
+			}
+			return; // skip normal suction / blow this frame
+		}
+
+		// ── Normal suction / blow ─────────────────────────────────────────────
+
+		// If a holdable projectile is incoming, focus all suction on it — nothing else gets pulled in
+		bool holdableLock = false;
+		if (_isSucking)
+		{
+			foreach (var b in _bodiesInRange)
+			{
+				if (IsInstanceValid(b) && b.IsInGroup("holdable"))
+				{
+					holdableLock = true;
+					break;
+				}
+			}
+		}
+
 		for (int i = _bodiesInRange.Count - 1; i >= 0; i--)
 		{
 			var body = _bodiesInRange[i];
@@ -106,6 +152,10 @@ public partial class Vacuum : Node3D
 				_bodiesInRange.RemoveAt(i);
 				continue;
 			}
+
+			// Focused suction: skip non-holdable objects while a can is incoming
+			if (holdableLock && !body.IsInGroup("holdable"))
+				continue;
 
 			var toObject = body.GlobalPosition - nozzlePos;
 			float distance = toObject.Length();
@@ -118,51 +168,128 @@ public partial class Vacuum : Node3D
 
 			if (_isSucking)
 			{
-				// Pull toward nozzle - force increases as object gets closer
+				// Pull toward nozzle — force increases as object gets closer
 				float forceMagnitude = SuctionForce / Mathf.Max(distance * 0.5f, 0.3f);
-
-				// Get the object's mass resistance
 				float massMultiplier = 1.0f / Mathf.Max(body.Mass, 0.1f);
 				var force = -dirToObject * forceMagnitude * Mathf.Min(massMultiplier, 3.0f);
-
-				// Add slight upward force to fight gravity when close
 				if (distance < 5.0f)
 					force.Y += 5.0f;
-
-				// Add a slight spiral toward nozzle for visual flair
 				var tangent = forward.Cross(dirToObject).Normalized();
 				force += tangent * forceMagnitude * 0.15f;
-
 				body.ApplyCentralForce(force);
 
-				// Dampen velocity as object approaches for smoother collection
 				if (distance < 3.0f)
 					body.LinearVelocity = body.LinearVelocity.Lerp(Vector3.Zero, 0.05f);
 
-				// Shrink object as it approaches nozzle
 				if (distance < ShrinkStartDistance)
 				{
 					float shrinkFactor = Mathf.Clamp(distance / ShrinkStartDistance, 0.1f, 1.0f);
 					body.Scale = Vector3.One * shrinkFactor;
 				}
 
-				// Collect if close enough
-				if (distance < CollectDistance && _collectedCount < MaxCapacity)
+				if (distance < CollectDistance)
 				{
-					CollectObject(body);
-					_bodiesInRange.RemoveAt(i);
+					// "holdable" objects are grabbed and held, not consumed
+					if (body.IsInGroup("holdable"))
+					{
+						GrabObject(body);
+						_bodiesInRange.RemoveAt(i);
+					}
+					else if (_collectedCount < MaxCapacity)
+					{
+						CollectObject(body);
+						_bodiesInRange.RemoveAt(i);
+					}
 				}
 			}
 			else if (_isBlowing)
 			{
-				// Push away from nozzle
 				float forceMagnitude = BlowForce / Mathf.Max(distance * 0.3f, 0.3f);
 				body.ApplyCentralForce(dirToObject * forceMagnitude);
-
-				// Add some upward kick for fun
 				body.ApplyCentralForce(Vector3.Up * forceMagnitude * 0.3f);
 			}
 		}
+	}
+
+	// ── Hold / fire methods ───────────────────────────────────────────────────
+
+	private void GrabObject(RigidBody3D body)
+	{
+		_heldObject = body;
+		_bodiesInRange.Remove(body);
+
+		// Remove from "vacuumable" so the SuctionArea won't re-detect it while held
+		body.RemoveFromGroup("vacuumable");
+
+		// Suspend physics: zero gravity, no collision (can't hit walls or player while held)
+		body.GravityScale = 0f;
+		body.CollisionLayer = 0;
+		body.CollisionMask = 0;
+		body.LinearVelocity = Vector3.Zero;
+		body.AngularVelocity = Vector3.Zero;
+		body.Scale = Vector3.One; // restore from suction shrink
+
+		// Prevent the original player-damage callback from firing after it's been grabbed
+		if (body.HasMeta("can_damage_player"))
+			body.SetMeta("can_damage_player", Variant.From(false));
+	}
+
+	private void DropHeldObject()
+	{
+		if (_heldObject == null) return;
+		var obj = _heldObject;
+		_heldObject = null;
+
+		obj.GravityScale = 1f;
+		obj.CollisionLayer = 1;
+		obj.CollisionMask = 1;
+		obj.LinearVelocity = Vector3.Zero;
+		obj.AngularVelocity = Vector3.Zero;
+
+		// Re-enable suction after a short delay so it can't be immediately re-grabbed
+		var timer = GetTree().CreateTimer(0.5);
+		timer.Timeout += () => { if (IsInstanceValid(obj)) obj.AddToGroup("vacuumable"); };
+	}
+
+	private void FireHeldObject()
+	{
+		if (_heldObject == null) return;
+		var obj = _heldObject;
+		_heldObject = null;
+
+		obj.GravityScale = 1f;
+		obj.CollisionLayer = 1;
+		obj.CollisionMask = 1;
+		obj.Scale = Vector3.One;
+
+		// Launch in the direction the player is aiming
+		var fireDir = -_nozzleTip.GlobalBasis.Z;
+		obj.LinearVelocity = fireDir * FireSpeed;
+		obj.AngularVelocity = new Vector3(
+			(GD.Randf() - 0.5f) * 14f,
+			(GD.Randf() - 0.5f) * 10f,
+			(GD.Randf() - 0.5f) * 14f
+		);
+
+		// Brief window before contact monitoring re-enables:
+		// prevents the can from immediately re-triggering on the player or nozzle
+		var timer = GetTree().CreateTimer(0.15);
+		timer.Timeout += () =>
+		{
+			if (!IsInstanceValid(obj)) return;
+
+			// Re-enable suction (player could catch it again if they miss)
+			obj.AddToGroup("vacuumable");
+
+			// Wire up monster damage on first hit
+			obj.ContactMonitor = true;
+			obj.MaxContactsReported = 2;
+			obj.BodyEntered += (body) =>
+			{
+				if (body is HoardAmalgamation monster)
+					monster.TakeDamage(ReflectDamage);
+			};
+		};
 	}
 
 	private void CollectObject(RigidBody3D body)
