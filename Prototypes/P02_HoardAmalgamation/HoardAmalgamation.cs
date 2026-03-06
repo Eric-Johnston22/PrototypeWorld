@@ -6,8 +6,8 @@ namespace Hoarders;
 /// The Hoard Amalgamation — a living pile of garbage that IS the room's enemy.
 /// Uses an animation-driven state machine with four animations from the GLB:
 ///   idle        — default, plays when out of aggro range
-///   throw       — ranged attack; SpawnProjectile() fires at ThrowReleaseTime
-///   hand attack — melee attack when player is very close; debris burst at MeleeImpactTime
+///   throw       — ranged attack; can spawns at ThrowSpawnTime, launches at ThrowReleaseTime
+///   hand_attack — melee attack when player is very close; debris burst at MeleeImpactTime
 ///   hurt        — interrupts any state when taking vacuum damage, then resumes
 /// </summary>
 public partial class HoardAmalgamation : CharacterBody3D
@@ -19,7 +19,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 	[Export] public float MeleeDistance = 7.0f;   // ~3 yards
 	[Export] public float VacuumRange = 14.0f;
 	[Export] public float ProjectileSpeed = 18.0f;
-	[Export] public int MeleeDamage = 15;
+	[Export] public int MeleeDamage = 20;
 	[Export] public int ProjectileDamage = 10;
 	// Local-space offset from monster origin → projectile spawn point (right hand).
 	// X = right, Y = height, Z = forward (-Z faces player after LookAt).
@@ -28,16 +28,19 @@ public partial class HoardAmalgamation : CharacterBody3D
 
 	// Animation names — must match exactly what Godot imported from the GLB.
 	// Check the Output panel on first run; available names are printed there.
-	[Export] public string AnimIdle   = "Idle";
+	[Export] public string AnimIdle   = "idle";
 	[Export] public string AnimThrow  = "throw";
-	[Export] public string AnimMelee  = "hand attack";
+	[Export] public string AnimMelee  = "hand_attack";
 	[Export] public string AnimHurt   = "hurt";
 
 	// Tune these to match the exact keyframe moment in the GLB animations
-	[Export] public float ThrowReleaseTime = 0.6f;  // seconds into throw anim when projectile spawns
-	[Export] public float MeleeImpactTime = 0.4f;   // seconds into melee anim when damage lands
+	[Export] public float ThrowSpawnTime   = 1.0f;  // seconds into throw anim when can appears in hand
+	[Export] public float ThrowReleaseTime = 3.5f;  // seconds into throw anim when can is launched
+	[Export] public float MeleeLungeTime   = 1.5f;  // seconds into melee anim the monster charges forward
+	[Export] public float MeleeImpactTime  = 4.02f; // seconds into melee anim when damage + shake land
 	[Export] public float ThrowCooldown = 1.0f;     // seconds between throws
-	[Export] public float HurtCooldown = 0.5f;      // prevents hurt anim spamming every frame
+	[Export] public float MeleeCooldown = 5.75f;    // seconds between melee attacks
+	[Export] public float HurtCooldown  = 0.5f;     // prevents hurt anim spamming every frame
 
 	private float _health;
 	private float _nextChunkThreshold;
@@ -53,10 +56,15 @@ public partial class HoardAmalgamation : CharacterBody3D
 	private State _state = State.Idle;
 	private State _stateBeforeHurt = State.Idle;
 
-	private bool _throwEventFired = false;
+	private bool _spawnEventFired = false; // visual proxy has appeared in hand
+	private bool _throwEventFired = false; // can has been launched as RigidBody3D
 	private bool _meleeEventFired = false;
+	// Visual-only Node3D proxy held in hand during wind-up.
+	// Using Node3D (not RigidBody3D) so GlobalPosition is never overridden by Jolt.
+	private Node3D? _thrownProjectile = null;
 	private float _throwCooldownTimer = 0f;
-	private float _hurtCooldownTimer = 0f;
+	private float _meleeCooldownTimer = 0f;
+	private float _hurtCooldownTimer  = 0f;
 
 	private readonly RandomNumberGenerator _rng = new();
 
@@ -125,7 +133,8 @@ public partial class HoardAmalgamation : CharacterBody3D
 
 		// Cooldown timers
 		_throwCooldownTimer = Mathf.Max(0f, _throwCooldownTimer - dt);
-		_hurtCooldownTimer = Mathf.Max(0f, _hurtCooldownTimer - dt);
+		_meleeCooldownTimer = Mathf.Max(0f, _meleeCooldownTimer - dt);
+		_hurtCooldownTimer  = Mathf.Max(0f, _hurtCooldownTimer  - dt);
 
 		// Vacuum damage check
 		if (_vacuum != null && _vacuum.IsSucking)
@@ -158,7 +167,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 				if (_state != State.Idle)
 					TransitionTo(State.Idle);
 			}
-			else if (dist <= MeleeDistance)
+			else if (dist <= MeleeDistance && _meleeCooldownTimer <= 0f)
 			{
 				// Melee takes full priority — interrupt throw if needed, but never hurt
 				if (_state != State.MeleeAttack && _state != State.Hurt)
@@ -182,21 +191,37 @@ public partial class HoardAmalgamation : CharacterBody3D
 		switch (_state)
 		{
 			case State.ThrowAttack:
-				// Check if we've reached the release frame yet
-				if (!_throwEventFired
-					&& _animPlayer != null
-					&& _animPlayer.CurrentAnimationPosition >= ThrowReleaseTime)
+				if (_animPlayer != null)
 				{
-					_throwEventFired = true;
-					SpawnProjectile();
+					float animPos = (float)_animPlayer.CurrentAnimationPosition;
+
+					// Phase 1 — visual proxy appears in the hand
+					if (!_spawnEventFired && animPos >= ThrowSpawnTime)
+					{
+						_spawnEventFired = true;
+						_thrownProjectile = CreateProjectileVisual();
+					}
+
+					// Pin the Node3D proxy to the hand every frame.
+					// Node3D.GlobalPosition is never overridden by the physics engine.
+					if (_thrownProjectile != null && animPos < ThrowReleaseTime)
+						_thrownProjectile.GlobalPosition = GetThrowOrigin();
+
+					// Phase 2 — swap visual proxy for a real RigidBody3D and launch it
+					if (!_throwEventFired && _thrownProjectile != null && animPos >= ThrowReleaseTime)
+					{
+						_throwEventFired = true;
+						LaunchProjectile(_thrownProjectile);
+						_thrownProjectile = null;
+					}
 				}
 				break;
 
 			case State.MeleeAttack:
-				// Lunge toward player during the windup portion
+				// Lunge toward player during the initial charge window only
 				if (_player != null
 					&& _animPlayer != null
-					&& _animPlayer.CurrentAnimationPosition < MeleeImpactTime)
+					&& _animPlayer.CurrentAnimationPosition < MeleeLungeTime)
 				{
 					var dir = (_player.GlobalPosition - GlobalPosition with { Y = GlobalPosition.Y }).Normalized();
 					velocity.X = dir.X * MoveSpeed * 2.5f;
@@ -235,12 +260,16 @@ public partial class HoardAmalgamation : CharacterBody3D
 				break;
 
 			case State.ThrowAttack:
+				_spawnEventFired = false;
 				_throwEventFired = false;
+				DropHeldProjectile();
 				PlayAnim(AnimThrow);
 				break;
 
 			case State.MeleeAttack:
 				_meleeEventFired = false;
+				_meleeCooldownTimer = MeleeCooldown;
+				DropHeldProjectile();
 				PlayAnim(AnimMelee);
 				break;
 		}
@@ -273,6 +302,7 @@ public partial class HoardAmalgamation : CharacterBody3D
 					PlayAnim(AnimIdle, loop: true);
 					break;
 				case State.ThrowAttack:
+					_spawnEventFired = false;
 					_throwEventFired = false;
 					PlayAnim(AnimThrow);
 					break;
@@ -291,18 +321,53 @@ public partial class HoardAmalgamation : CharacterBody3D
 	// Combat events
 	// -------------------------------------------------------------------------
 
-	private void SpawnProjectile()
+	/// <summary>
+	/// Creates a plain Node3D with the Dr. Heffer visual so it can be pinned to
+	/// the hand each frame without interference from the physics engine.
+	/// Call LaunchProjectile() to replace it with a real RigidBody3D.
+	/// </summary>
+	private Node3D CreateProjectileVisual()
 	{
-		// Projectile body — vacuumable so the player can pick it up and throw it back
+		var visual = new Node3D();
+
+		var modelScene = GD.Load<PackedScene>("res://Shared/Assets/Models/drhefferfixed2.glb");
+		if (modelScene != null)
+		{
+			var model = modelScene.Instantiate<Node3D>();
+			model.Scale = Vector3.One * 0.25f;
+			visual.AddChild(model);
+		}
+		else
+		{
+			var fallback = new MeshInstance3D();
+			fallback.Mesh = new SphereMesh { Radius = 0.25f, Height = 0.5f };
+			visual.AddChild(fallback);
+			GD.PrintErr("HoardAmalgamation: drhefferfixed2.glb not found — using fallback mesh.");
+		}
+
+		GetTree().Root.AddChild(visual);
+		visual.GlobalPosition = GetThrowOrigin();
+		return visual;
+	}
+
+	/// <summary>
+	/// Frees the visual proxy, creates a proper RigidBody3D at the same position,
+	/// and launches it toward the player.
+	/// </summary>
+	private void LaunchProjectile(Node3D visual)
+	{
+		var launchPos = visual.GlobalPosition;
+		visual.QueueFree();
+
 		var projectile = new RigidBody3D();
 		projectile.ContinuousCd = true;
 		projectile.ContactMonitor = true;
 		projectile.MaxContactsReported = 2;
-		projectile.AddToGroup("vacuumable"); // vacuum can attract it
-		projectile.AddToGroup("holdable");   // vacuum holds it instead of collecting it
+		projectile.AddToGroup("vacuumable");
+		projectile.AddToGroup("holdable");
 		projectile.SetMeta("display_name", "Dr. Heffer Can");
+		projectile.SetMeta("can_damage_player", Variant.From(true));
 
-		// Dr. Heffer model as the visual
 		var modelScene = GD.Load<PackedScene>("res://Shared/Assets/Models/drhefferfixed2.glb");
 		if (modelScene != null)
 		{
@@ -312,29 +377,25 @@ public partial class HoardAmalgamation : CharacterBody3D
 		}
 		else
 		{
-			// Fallback if the GLB isn't imported yet
 			var fallback = new MeshInstance3D();
 			fallback.Mesh = new SphereMesh { Radius = 0.25f, Height = 0.5f };
 			projectile.AddChild(fallback);
-			GD.PrintErr("HoardAmalgamation: drhefferfixed2.glb not found — using fallback mesh.");
 		}
 
-		// Collision shape
 		var col = new CollisionShape3D();
 		col.Shape = new SphereShape3D { Radius = 0.35f };
 		projectile.AddChild(col);
 
-		// Spawn at the monster's hand position
-		projectile.Position = GetThrowOrigin();
 		GetTree().Root.AddChild(projectile);
+		projectile.GlobalPosition = launchPos;
+		projectile.AddCollisionExceptionWith(this);
 
-		// Launch toward the player's chest height
+		// Throw toward player's chest
 		if (_player != null)
 		{
 			var target = _player.GlobalPosition + Vector3.Up * 1.0f;
-			var dir = (target - projectile.Position).Normalized();
+			var dir = (target - projectile.GlobalPosition).Normalized();
 			projectile.LinearVelocity = dir * ProjectileSpeed;
-			// Tumbling spin for character — rotate around a random axis
 			projectile.AngularVelocity = new Vector3(
 				_rng.RandfRange(-6f, 6f),
 				_rng.RandfRange(-4f, 4f),
@@ -342,21 +403,18 @@ public partial class HoardAmalgamation : CharacterBody3D
 			);
 		}
 
-		// Deal damage once on first contact with the player.
-		// The "can_damage_player" meta is set to false when the player grabs it,
-		// so a reflected can never damages the player.
-		projectile.SetMeta("can_damage_player", Variant.From(true));
+		// Damage player on first contact
 		projectile.BodyEntered += (body) =>
 		{
 			if (!projectile.GetMeta("can_damage_player", Variant.From(true)).AsBool()) return;
 			if (body is PlayerController pc)
 			{
-				projectile.SetMeta("can_damage_player", Variant.From(false)); // one hit only
+				projectile.SetMeta("can_damage_player", Variant.From(false));
 				pc.TakeDamage(ProjectileDamage);
 			}
 		};
 
-		// Auto-clean after 10 seconds so stray projectiles don't litter the room
+		// Auto-clean after 10 seconds
 		var lifetime = GetTree().CreateTimer(10.0);
 		lifetime.Timeout += () =>
 		{
@@ -365,15 +423,29 @@ public partial class HoardAmalgamation : CharacterBody3D
 		};
 	}
 
+	/// <summary>
+	/// Discards the held visual proxy (if any).
+	/// Called when the throw is interrupted by melee, hurt, or death.
+	/// </summary>
+	private void DropHeldProjectile()
+	{
+		if (_thrownProjectile == null || !IsInstanceValid(_thrownProjectile)) return;
+		_thrownProjectile.QueueFree();
+		_thrownProjectile = null;
+	}
+
 	private void OnMeleeImpact()
 	{
 		// Visual feedback — debris burst at impact
 		for (int i = 0; i < 4; i++)
 			SpawnDebrisChunk();
 
-		// Damage the player
+		// Damage + screen shake land at the exact same moment
 		if (_player is PlayerController pc)
+		{
 			pc.TakeDamage(MeleeDamage);
+			pc.AddTrauma(0.85f);
+		}
 	}
 
 	public void TakeDamage(float amount)
@@ -394,9 +466,10 @@ public partial class HoardAmalgamation : CharacterBody3D
 		if (_hurtCooldownTimer <= 0f && _state != State.Hurt)
 		{
 			_stateBeforeHurt = _state;
+			DropHeldProjectile(); // discard visual proxy before interrupting the throw
 			_state = State.Hurt;
 			_hurtCooldownTimer = HurtCooldown;
-			PlayAnim("hurt");
+			PlayAnim(AnimHurt);
 		}
 		else
 		{
@@ -445,12 +518,10 @@ public partial class HoardAmalgamation : CharacterBody3D
 	{
 		if (_skeleton != null)
 		{
-			// Try common humanoid right-hand bone names (Blender, Mixamo, etc.)
 			string[] candidates =
 			{
 				"Hand.R", "hand.R", "RightHand", "right_hand", "Hand_R",
 				"mixamorig:RightHand", "Bip01_R_Hand", "RHand", "r_hand",
-				// Also try left hand variants in case the rig is mirrored
 				"Hand.L", "hand.L", "LeftHand", "left_hand", "Hand_L",
 			};
 			foreach (var boneName in candidates)
@@ -458,15 +529,12 @@ public partial class HoardAmalgamation : CharacterBody3D
 				int idx = _skeleton.FindBone(boneName);
 				if (idx >= 0)
 				{
-					// GetBoneGlobalPose returns pose in skeleton-local space; multiply by skeleton's global transform
 					var boneOrigin = _skeleton.GlobalTransform * _skeleton.GetBoneGlobalPose(idx).Origin;
 					return boneOrigin;
 				}
 			}
 		}
 
-		// Fallback: offset in the monster's local space.
-		// After FacePlayer(), -Z faces the player, so negative Z = forward.
 		return GlobalPosition + GlobalTransform.Basis * ThrowOffset;
 	}
 

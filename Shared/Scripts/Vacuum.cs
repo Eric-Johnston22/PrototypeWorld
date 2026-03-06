@@ -38,7 +38,7 @@ public partial class Vacuum : Node3D
 	public int CollectedCount => _collectedCount;
 
 	// Public API for other systems (e.g. HordeAmalgamation) to poll vacuum state
-	public bool IsSucking => _isSucking;
+	public bool IsSucking => _isSucking && _heldObject == null;
 	public bool IsBlowing => _isBlowing;
 	public Vector3 NozzleGlobalPosition => _nozzleTip != null ? _nozzleTip.GlobalPosition : GlobalPosition;
 	public Vector3 NozzleForward => _nozzleTip != null ? -_nozzleTip.GlobalBasis.Z : -GlobalBasis.Z;
@@ -88,7 +88,7 @@ public partial class Vacuum : Node3D
 			_isBlowing = Input.IsActionPressed("vacuum_blow") && !_isSucking && _heldObject == null;
 		}
 
-		_suctionParticles.Emitting = _isSucking;
+		_suctionParticles.Emitting = _isSucking && _heldObject == null;
 
 		// Bob the nozzle slightly when active or holding
 		if (_isSucking || _isBlowing || _heldObject != null)

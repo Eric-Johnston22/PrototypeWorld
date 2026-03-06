@@ -16,6 +16,10 @@ public partial class PlayerController : CharacterBody3D
 	[Export] public float Friction = 8.0f;
 	[Export] public int MaxHealth = 100;
 
+	// Screen shake — trauma decays over time; AddTrauma() spikes it on hit
+	[Export] public float TraumaDecay     = 1.8f;   // trauma units lost per second
+	[Export] public float MaxShakeAngleDeg = 4.0f;  // peak camera rotation at full trauma
+
 	public bool InvertY = false;
 	public int CurrentHealth { get; private set; }
 
@@ -23,8 +27,11 @@ public partial class PlayerController : CharacterBody3D
 	[Signal] public delegate void PlayerDiedEventHandler();
 
 	private Node3D _head;
+	private Camera3D? _camera;
 	private float _gravity;
 	private bool _isDead = false;
+	private float _trauma = 0f;
+	private readonly RandomNumberGenerator _rng = new();
 
 	public override void _Ready()
 	{
@@ -35,16 +42,37 @@ public partial class PlayerController : CharacterBody3D
 		Input.MouseMode = Input.MouseModeEnum.Captured;
 
 		// Apply saved settings if SettingsManager is available
+		_camera = _head.GetNodeOrNull<Camera3D>("Camera3D");
+
 		var sm = GetNodeOrNull<Node>("/root/SettingsManager");
 		if (sm != null)
 		{
 			MouseSensitivity = (float)sm.Get("MouseSensitivity");
 			InvertY = (bool)sm.Get("InvertY");
-			var cam = _head.GetNodeOrNull<Camera3D>("Camera3D");
-			if (cam != null)
-				cam.Fov = (float)sm.Get("FieldOfView");
+			if (_camera != null)
+				_camera.Fov = (float)sm.Get("FieldOfView");
 		}
 	}
+
+	public override void _Process(double delta)
+	{
+		if (_camera == null || _trauma <= 0f) return;
+
+		_trauma = Mathf.Max(0f, _trauma - TraumaDecay * (float)delta);
+		float shake = _trauma * _trauma; // squared for snappier feel at low trauma
+		float maxRad = Mathf.DegToRad(MaxShakeAngleDeg);
+		_camera.Rotation = new Vector3(
+			_rng.RandfRange(-maxRad, maxRad) * shake,
+			_rng.RandfRange(-maxRad, maxRad) * shake,
+			_rng.RandfRange(-maxRad, maxRad) * shake
+		);
+	}
+
+	/// <summary>
+	/// Add screen-shake trauma in the 0–1 range. Values stack up to 1.
+	/// Typical hits: light = 0.3, medium = 0.6, heavy = 0.9.
+	/// </summary>
+	public void AddTrauma(float amount) => _trauma = Mathf.Min(1f, _trauma + amount);
 
 	public override void _Input(InputEvent @event)
 	{
